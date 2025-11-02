@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import requests  # <-- PHASE 3 IMPORT
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -18,37 +19,45 @@ class AgentClient:
     """
     The 'Brain' of the Agent. Manages private key initialization,
     the LLM logic (simulated here), and task signing.
+    Now also handles registration with the Trust Directory (Phase 3).
     """
 
     def __init__(self):
         """Initializes the client and loads Zero-Trust assets."""
         logging.info("Initializing Agent Client (The Brain)...")
 
-        # 1. Load the private key for signing (Zero-Trust)
-        private_key_pem = os.environ.get("AGENT_PRIVATE_KEY")
-        if not private_key_pem:
+        # 1. Load Trust Assets (Keys)
+        self.agent_private_key = os.environ.get("AGENT_PRIVATE_KEY")
+        if not self.agent_private_key:
             logging.error("FATAL: AGENT_PRIVATE_KEY environment variable not set.")
             raise EnvironmentError("AGENT_PRIVATE_KEY must be set for signing.")
 
-        # The actual code would load the Ed25519 key from the PEM format
-        # self.private_key = serialization.load_pem_private_key(
-        #     private_key_pem.encode('utf-8'),
-        #     password=None, # The key is not password protected in this reference setup
-        #     backend=default_backend()
-        # )
-        self.agent_private_key = private_key_pem  # Storing raw PEM for simulation
-        logging.info("Agent Private Key loaded successfully (Simulated).")
+        # PHASE 3: Load Public Key to publish it
+        self.agent_public_key = os.environ.get("AGENT_PUBLIC_KEY")
+        if not self.agent_public_key:
+            logging.error("FATAL: AGENT_PUBLIC_KEY environment variable not set.")
+            raise EnvironmentError("AGENT_PUBLIC_KEY must be set for directory registration.")
 
-        # 2. Load the model access key (LLM)
+        logging.info("Agent Private & Public Keys loaded successfully (Simulated).")
+
+        # 2. Load Model Access Key (LLM)
         self.gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not self.gemini_api_key:
             logging.error("FATAL: GEMINI_API_KEY environment variable not set.")
             raise EnvironmentError("GEMINI_API_KEY must be set for LLM access.")
 
-        # 3. Load the Manifest to retrieve the agent_id (Phase 2 Compliance)
+        # 3. Load Manifest and Agent ID (Phase 2)
         self.manifest = self._load_manifest_locally()
         self.agent_id = self.manifest.get("agent_id", "unknown_agent")
         logging.info(f"Agent ID configured: {self.agent_id}")
+
+        # 4. Load Trust Directory URL (Phase 3)
+        self.trust_directory_url = os.environ.get("TRUST_DIRECTORY_URL")
+        if not self.trust_directory_url:
+            logging.warning("TRUST_DIRECTORY_URL not set. Skipping directory registration.")
+        else:
+            # This is the new call to publish our identity on startup
+            self._register_with_trust_directory()
 
     def _load_manifest_locally(self) -> Dict[str, Any]:
         """Loads the manifest from disk (used to retrieve the agent_id)."""
@@ -59,6 +68,36 @@ class AgentClient:
         except Exception as e:
             logging.error(f"FATAL: Could not load manifest locally: {e}")
             raise
+
+    def _register_with_trust_directory(self):
+        """
+        PHASE 3: Publishes this agent's identity and public key to the
+        central Trust Directory on startup.
+        """
+        if not self.trust_directory_url:
+            return  # Should not happen if called from __init__
+
+        logging.info(f"Registering agent {self.agent_id} with Trust Directory at {self.trust_directory_url}...")
+
+        endpoint = f"{self.trust_directory_url}/register"
+        payload = {
+            "agent_id": self.agent_id,
+            "public_key": self.agent_public_key,
+            "algorithm": "Ed25519"  # From our manifest
+        }
+
+        try:
+            response = requests.post(endpoint, json=payload, timeout=5)
+
+            if response.status_code == 200 or response.status_code == 201:
+                logging.info(
+                    f"Successfully registered/updated identity in Trust Directory: {response.json().get('message')}")
+            else:
+                logging.error(
+                    f"Failed to register with Trust Directory. Status: {response.status_code}, Body: {response.text}")
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Could not connect to Trust Directory at {endpoint}: {e}")
 
     def _sign_task(self, task_data: Dict[str, Any]) -> str:
         """
@@ -111,9 +150,15 @@ class AgentClient:
 # --- Entry Point (Not executed by the Orchestrator, but for testing) ---
 if __name__ == '__main__':
     try:
+        # For testing, we must set the new env vars
+        os.environ["AGENT_PUBLIC_KEY"] = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"
+        os.environ["TRUST_DIRECTORY_URL"] = "http://127.0.0.1:9000"  # Mock URL
+
         client = AgentClient()
         test_response = client.process_chat_turn("Hello, what is your name?", {"user_name": "Robert"})
         logging.info("Test Run Successful.")
         print(json.dumps(test_response, indent=2))
+
     except EnvironmentError as e:
         logging.critical(f"Client Test Failed: {e}")
+

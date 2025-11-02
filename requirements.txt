@@ -1,7 +1,15 @@
-# Python dependencies for the Agnostic Agent (v3.0)
+#Transport Layer (orchestrator.py) Used to run the Flask API server.
 
-Flask==3.0.3
-google-generativeai==0.7.1
+Flask
 
-# New dependency for Task 2 (Task Signing)
-cryptography==43.0.0
+#Brain (agent_client.py) the LLM provider. We use this for Gemini.
+
+google-generativeai
+
+#Zero-Trust Protocol (agent_client.py) Required for Ed25519 key loading and signature verification.
+
+cryptography
+
+#Phase 3: Trust Directory Client (agent_client.py) Required to make HTTP calls to the Trust Directory.
+
+requests
