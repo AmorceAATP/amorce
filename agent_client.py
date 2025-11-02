@@ -79,7 +79,7 @@ class AgentClient:
 
         logging.info(f"Registering agent {self.agent_id} with Trust Directory at {self.trust_directory_url}...")
 
-        endpoint = f"{self.trust_directory_url}/register"
+        endpoint = f"{self.trust_directory_url}/api/v1/register"
         payload = {
             "agent_id": self.agent_id,
             "public_key": self.agent_public_key,
