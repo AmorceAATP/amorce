@@ -112,7 +112,7 @@ class AgentClient:
 
             nlu_config = {"temperature": 0.0, "top_p": 1, "top_k": 1, "max_output_tokens": 2048}
             self.llm_nlu = genai.GenerativeModel(
-                model_name="gemini-pro", # Using a stable model
+                model_name="gemini-2.5-pro", # Using a stable model
                 system_instruction=NLU_SYSTEM_PROMPT
             )
 
