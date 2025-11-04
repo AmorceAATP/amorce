@@ -115,10 +115,6 @@ class AgentClient:
             model_name="gemini-pro",  # Using a stable model
             system_instruction=NLU_SYSTEM_PROMPT
         )
-        self.llm_nlg = genai.GenerativeModel(
-            model_name="gemini-pro",  # Using a stable model
-            system_instruction=NLG_SYSTEM_PROMPT
-        )
         logging.info("Gemini NLU and NLG models initialized.")
 
         # --- 3. Load Manifest and Agent ID (Phase 2) ---
