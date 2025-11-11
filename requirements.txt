@@ -13,3 +13,7 @@ cryptography
 #Phase 3: Trust Directory Client (agent_client.py) Required to make HTTP calls to the Trust Directory.
 
 requests
+
+google-cloud-firestore
+
+google-cloud-secret-manager
