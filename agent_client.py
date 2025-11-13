@@ -194,7 +194,7 @@ if __name__ == "__main__":
 
         # !!! IMPORTANT !!!
         # This ID was provided from your last Firestore document creation
-        TEST_SERVICE_ID = "FhIbtwoK2B3jZ89O8Z90" # <-- This is your ID
+        TEST_SERVICE_ID = "637e78d1-259e-4a12-a2fb-da15cb50f454" # <-- This is your ID
 
         # This block will now run the 'else' path successfully.
         if "YOUR-FIRESTORE-SERVICE-ID-HERE" in TEST_SERVICE_ID:
