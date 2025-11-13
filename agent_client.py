@@ -9,7 +9,7 @@ from cryptography.hazmat.backends import default_backend
 from google.cloud import secretmanager  # New import
 import base64
 import json
-from uuid import uuid4  # P-3 Import
+from uuid import uuid4         # P-3 Import
 from datetime import datetime, UTC  # P-3 Import (Fixed)
 
 # --- Configuration ---
@@ -33,7 +33,6 @@ SECRET_NAME = "atp-agent-private-key"
 
 # In-memory cache for the private key
 _private_key_cache = None
-
 
 def _get_key_from_secret_manager():
     """
@@ -71,7 +70,6 @@ def _get_key_from_secret_manager():
         print(f"Error: {e}")
         raise
 
-
 def sign_message(message_body: dict) -> str:
     """
     Signs a message body (dict) using the in-memory Ed25519 private key.
@@ -89,7 +87,6 @@ def sign_message(message_body: dict) -> str:
     # Return the signature as Base64 for HTTP transport
     return base64.b64encode(signature).decode('utf-8')
 
-
 def send_signed_request(action, text):
     """
     (P-1 Test) Builds, signs, and sends a request to the /invoke endpoint.
@@ -97,7 +94,7 @@ def send_signed_request(action, text):
     print(f"Sending P-1 request to {ORCHESTRATOR_INVOKE_URL}...")
 
     body = {
-        "agent_id": AGENT_ID,  # P-4: This is now a UUID
+        "agent_id": AGENT_ID, # P-4: This is now a UUID
         "action": action,
         "text": text,
         "timestamp": int(time.time())
@@ -144,11 +141,11 @@ def send_a2a_transaction(service_id: str, query: str):
     body = {
         "transaction_id": str(uuid4()),
         "service_id": service_id,
-        "consumer_agent_id": AGENT_ID,  # P-4: This is now a UUID
+        "consumer_agent_id": AGENT_ID, # P-4: This is now a UUID
         # FIX: Use timezone-aware datetime.now(datetime.UTC)
         "timestamp": datetime.now(UTC).isoformat(),
         "payload": {
-            "query": query  # This matches the 'input_schema' we created
+            "query": query # This matches the 'input_schema' we created
         }
     }
 
@@ -160,12 +157,12 @@ def send_a2a_transaction(service_id: str, query: str):
         return
 
     headers = {
-        "X-Agent-Signature": signature,  # L2 Security
+        "X-Agent-Signature": signature, # L2 Security
         "Content-Type": "application/json"
     }
 
     if AGENT_API_KEY:
-        headers["X-API-Key"] = AGENT_API_KEY  # L1 Security
+        headers["X-API-Key"] = AGENT_API_KEY # L1 Security
     else:
         print("CRITICAL: AGENT_API_KEY environment variable not set. Request will fail authentication.")
         return
@@ -185,35 +182,37 @@ if __name__ == "__main__":
         # Load key once
         _get_key_from_secret_manager()
 
-        # --- Test P-1 (P-4 VALIDATION) ---
-        print("\n--- RUNNING P-1 (INVOKE) TEST (P-4 VALIDATION) ---")
-        send_signed_request(
-            action="query_nlu",
-            text="What is the status of project Nexus?"
-        )
+        # --- Test P-1 (Commented out) ---
+        # print("\n--- RUNNING P-1 (INVOKE) TEST (P-4 VALIDATION) ---")
+        # send_signed_request(
+        #     action="query_nlu",
+        #     text="What is the status of project Nexus?"
+        # )
 
-        # --- Test P-3 (Commented out) ---
-        # print("\n--- RUNNING P-3 (A2A TRANSACT) TEST ---")
+        # --- Test P-3 (NOW ACTIVE) ---
+        print("\n--- RUNNING P-3 (A2A TRANSACT) TEST ---")
 
         # !!! IMPORTANT !!!
-        # Replace this with the Document ID (service_id) you copied from Firestore
-        # TEST_SERVICE_ID = "0gY79QjN2M9ex0t8CgL1" # <-- EXAMPLE ID. REPLACE THIS.
+        # This ID was provided from your last Firestore document creation
+        TEST_SERVICE_ID = "FhIbtwoK2B3jZ89O8Z90" # <-- This is your ID
 
-        # if "YOUR-FIRESTORE-SERVICE-ID-HERE" in TEST_SERVICE_ID:
-        #     print("ERROR: Please update TEST_SERVICE_ID in agent_client.py (line 217)")
-        # elif "0gY79QjN2M9ex0t8CgL1" in TEST_SERVICE_ID:
-        #     print("WARNING: TEST_SERVICE_ID is still set to the example value.")
-        #     print("Please update it to a real Service ID from your 'services' collection in Firestore.")
-        #     # We still run the test, but it will likely fail.
-        #     send_a2a_transaction(
-        #         service_id=TEST_SERVICE_ID,
-        #         query="What is the capital of France?"
-        #     )
-        # else:
-        #     send_a2a_transaction(
-        #         service_id=TEST_SERVICE_ID,
-        #         query="What is the capital of France?"
-        #     )
+        # This block will now run the 'else' path successfully.
+        if "YOUR-FIRESTORE-SERVICE-ID-HERE" in TEST_SERVICE_ID:
+            print("ERROR: Please update TEST_SERVICE_ID in agent_client.py (line 217)")
+        elif "FhIbtwoK2B3jZ89O8Z90" in TEST_SERVICE_ID:
+             print("Running P-3 test with Service ID: FhIbtwoK2B3jZ89O8Z90")
+             # This will run
+             send_a2a_transaction(
+                 service_id=TEST_SERVICE_ID,
+                 query="What is the capital of France?"
+             )
+        else:
+            # Or this path will run if you change the ID to something else
+            print(f"Running P-3 test with Service ID: {TEST_SERVICE_ID}")
+            send_a2a_transaction(
+                service_id=TEST_SERVICE_ID,
+                query="What is the capital of France?"
+            )
 
     except Exception as e:
         print(f"Agent failed to start: {e}")
