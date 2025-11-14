@@ -21,6 +21,7 @@ ORCHESTRATOR_TRANSACT_URL = "https://amorce-api-425870997313.us-central1.run.app
 # P-4: AGENT_ID is our agent's (Agent A) static UUID
 AGENT_ID = os.environ.get("AGENT_ID", "e4b0c7c8-4b9f-4b0d-8c1a-2b9d1c9a0c1a")
 
+
 # L1 Security: API Key for the Orchestrator
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY")
 
@@ -193,7 +194,7 @@ if __name__ == "__main__":
         print("\n--- RUNNING P-6 (FAKE STORE API TRANSACT) TEST ---")
 
         # Tâche P-6.2: This is the new Service ID for "product_retrieval"
-        TEST_SERVICE_ID = "s7c1b1c8-b1c1-4c1e-c1e1-b1c1e8f4b1s7"
+        TEST_SERVICE_ID = "bf8ba5d0-9337-41e3-8d96-1c593f5665c1"
 
         # Tâche P-6.4: This is the new payload (must match the input_schema)
         # We fetch product "1"

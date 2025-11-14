@@ -53,7 +53,7 @@ def require_api_key(f: Callable) -> Callable:
             logging.warning("Bypassing API key check (server key not set).")
             return f(*args, **kwargs)
 
-        key = request.headers.get('X-API-Key')  # Using a simple key name
+        key = request.headers.get('X-API-Key')
         if not key or key != AGENT_API_KEY:
             logging.warning(f"Unauthorized access attempt. Invalid X-API-Key provided.")
             return jsonify({"error": "Unauthorized"}), 401
@@ -65,56 +65,58 @@ def require_api_key(f: Callable) -> Callable:
     return decorated_function
 
 
-# --- P-1 / P-4 / P-5: In-Memory Caching ---
-
-# { "agent_id_uuid": (Ed25519PublicKey, timestamp), ... }
+# --- P-1 / P-4: In-Memory Public Key Cache ---
+# { "agent_id": (Ed25519PublicKey, timestamp), ... }
 PUBLIC_KEY_CACHE: Dict[str, tuple] = {}
-# { "agent_id_uuid": (AgentIdentityRecord_dict, timestamp), ... }
-AGENT_RECORD_CACHE: Dict[str, tuple] = {}
-CACHE_TTL_SECONDS = 300  # 5 minutes, as requested by Athéna
+CACHE_TTL_SECONDS = 300  # 5 minutes
+
+# --- P-5: New Agent Record Cache ---
+# Caches the full AgentIdentityRecord (which includes metadata.api_endpoint)
+AGENT_RECORD_CACHE: Dict[str, dict] = {}
+AGENT_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
 def get_agent_record(agent_id: str) -> Optional[dict]:
     """
     (P-5.2) Fetches the full AgentIdentityRecord from the Trust Directory.
-    Implements P-1: In-memory cache with a 5-minute TTL.
-    Implements P-4: Checks the 'status' field.
+    Implements P-5: In-memory cache with a 5-minute TTL.
+    Implements P-4: Checks the 'status' field from the AgentIdentityRecord.
     """
     if not TRUST_DIRECTORY_URL:
-        logging.error("FATAL: TRUST_DIRECTORY_URL is not set. Cannot verify signatures.")
+        logging.error("FATAL: TRUST_DIRECTORY_URL is not set. Cannot get agent records.")
         return None
 
     # 1. Check cache first
     cached_data = AGENT_RECORD_CACHE.get(agent_id)
     if cached_data:
+        # We store the dict and the timestamp
         record, timestamp = cached_data
-        if (time.time() - timestamp) < CACHE_TTL_SECONDS:
+        if (time.time() - timestamp) < AGENT_CACHE_TTL_SECONDS:
             logging.info(f"Cache HIT for agent record '{agent_id}'.")
             return record
         else:
             logging.info(f"Cache STALE for agent record '{agent_id}'. Fetching...")
 
     # 2. If not in cache or stale, fetch from Trust Directory
-    document_id = agent_id
-    lookup_url = f"{TRUST_DIRECTORY_URL}/api/v1/lookup/{document_id}"
+    lookup_url = f"{TRUST_DIRECTORY_URL}/api/v1/lookup/{agent_id}"
 
     try:
         logging.info(f"Cache MISS. Fetching agent record for '{agent_id}' from: {lookup_url}")
         response = requests.get(lookup_url, timeout=3)  # 3 second timeout
 
         if response.status_code != 200:
-            logging.error(f"Agent record lookup failed: Trust Directory returned {response.status_code} for {agent_id}")
+            logging.error(
+                f"Agent record lookup failed (HTTP {response.status_code}): {response.text}")
             return None
 
         data = response.json()
 
-        # --- P-4: New Status Check (Annexe A compliance) ---
+        # P-4 Status Check
         agent_status = data.get("status")
         if agent_status != "active":
             logging.warning(
-                f"Agent record lookup failed: Agent '{agent_id}' is not active (status: {agent_status}).")
-            return None  # Reject if not active
-        # --- End P-4 Check ---
+                f"Agent record validation failed: Agent '{agent_id}' is not active (status: {agent_status}).")
+            return None
 
         # 4. Store in cache and return
         AGENT_RECORD_CACHE[agent_id] = (data, time.time())
@@ -132,35 +134,37 @@ def get_agent_record(agent_id: str) -> Optional[dict]:
 def get_public_key(agent_id: str) -> Optional[ed25519.Ed25519PublicKey]:
     """
     (P-4 Updated) Fetches the public key for a given agent_id (now a UUID).
-    Relies on get_agent_record() to handle caching and validation.
+    Uses the new get_agent_record() function to leverage its cache.
     """
 
-    # 1. Check public key cache first (fastest)
-    cached_key = PUBLIC_KEY_CACHE.get(agent_id)
-    if cached_key:
-        key, timestamp = cached_key
+    # 1. Check the old PUBLIC_KEY_CACHE first (fast path)
+    cached_key_data = PUBLIC_KEY_CACHE.get(agent_id)
+    if cached_key_data:
+        key, timestamp = cached_key_data
         if (time.time() - timestamp) < CACHE_TTL_SECONDS:
             logging.info(f"Cache HIT for public key '{agent_id}'.")
             return key
 
-    # 2. If key not cached, get the full agent record
-    #    This will use its own cache (AGENT_RECORD_CACHE)
+    # 2. If not in key cache, get the full agent record (which has its own cache)
+    logging.info(f"Cache MISS for public key. Checking agent record cache for '{agent_id}'...")
     agent_record = get_agent_record(agent_id)
 
     if not agent_record:
-        # get_agent_record() already logged the error
+        # get_agent_record() already logged the error (404, timeout, or inactive)
         return None
 
-    # 3. Extract, load, and cache the public key
+    # 3. We have the record, extract the key
     try:
         public_key_pem = agent_record.get("public_key")
         if not public_key_pem:
-            logging.error(f"Signature verification failed: Agent record for '{agent_id}' missing 'public_key'.")
+            logging.error(
+                f"Signature verification failed: Trust Directory response for '{agent_id}' missing 'public_key'.")
             return None
 
+        # 4. Load the PEM string into a cryptography object
         public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'))
 
-        # 4. Store in *public key* cache and return
+        # 5. Store in our fast-path (key-only) cache and return
         PUBLIC_KEY_CACHE[agent_id] = (public_key, time.time())
         logging.info(f"Successfully loaded and cached public key for: {agent_id}")
         return public_key
@@ -200,7 +204,7 @@ def invoke_agent():
         logging.error(f"Zero-Trust Violation: Could not retrieve or validate public key for agent '{agent_id}'.")
         return jsonify({"error": f"Failed to verify agent identity: {agent_id}"}), 403
 
-        # 3. Verify Signature
+    # 3. Verify Signature
     try:
         # 3a. Canonicalize the task data (must match *exactly* how the agent signed it)
         canonical_message = json.dumps(body, sort_keys=True).encode('utf-8')
@@ -292,7 +296,7 @@ def a2a_transact():
     provider_agent_id = service_contract.get("provider_agent_id")
     if not provider_agent_id:
         logging.error(f"A2A Routing Error: Service '{service_id}' has no 'provider_agent_id'.")
-        return jsonify({"error": "Service is misconfigured (missing provider)"}), 500
+        return jsonify({"error": f"Service is misconfigured (missing provider)"}), 500
 
     logging.info(f"A2A Routing: Identifying provider '{provider_agent_id}'...")
     provider_record = get_agent_record(provider_agent_id)  # Uses our P-4 cache
@@ -304,9 +308,9 @@ def a2a_transact():
     provider_endpoint = provider_record.get("metadata", {}).get("api_endpoint")
     if not provider_endpoint:
         logging.error(f"A2A Routing Error: Provider Agent '{provider_agent_id}' has no 'api_endpoint' in metadata.")
-        return jsonify({"error": "Provider agent is misconfigured (missing endpoint)"}), 500
+        return jsonify({"error": f"Provider agent is misconfigured (missing endpoint)"}), 500
 
-    # --- 4. NEW P-6.3 LOGIC: EXTERNAL ROUTING ---
+    # --- 4. P-6.3: EXTERNAL ROUTING LOGIC ---
     logging.info(f"A2A Routing (P-6): Provider is external API at {provider_endpoint}")
 
     # 4a. Get the path template from the service contract
@@ -322,7 +326,6 @@ def a2a_transact():
     try:
         # 4c. Build the final URL by replacing placeholders
         # (e.g., /products/{product_id} + {"product_id": "1"} -> /products/1)
-        # Note: We assume all required keys exist in the payload
         final_path = path_template.format(**payload)
         final_url = f"{provider_endpoint}{final_path}"
 
@@ -331,7 +334,7 @@ def a2a_transact():
         # 4d. Execute the external GET request
         # Note: FakeStoreAPI does not require auth headers
         provider_response = requests.get(final_url, timeout=10)
-        provider_response.raise_for_status()  # Raise an exception for 4xx/5xx errors
+        provider_response.raise_for_status()  # Raise exception for 4xx/5xx errors
 
         # 4e. Get the JSON response from the external API
         external_json_result = provider_response.json()
@@ -360,12 +363,13 @@ def a2a_transact():
     return jsonify(final_tx_response), 200
 
 
-# --- TASK P-5.4: "SLAVE" ENDPOINT (REMOVED) ---
+# --- P-5: "Slave" Endpoint (REMOVED) ---
 # The /v1/services/execute_data_analysis endpoint has been removed
-# as it is replaced by the P-6 external routing.
+# as it is replaced by the external P-6 routing logic.
 
 # --- Application Startup ---
 if __name__ == '__main__':
+    # This block is only for local 'flask run' debugging
+    # It is NOT used by Gunicorn/Cloud Run
     logging.info("Flask Orchestrator (P-6 FSA Ready) initialized successfully.")
-    # Note: Flask's 'run' is only for local dev.
     app.run(debug=True, port=int(os.environ.get('PORT', 8080)), host='0.0.0.0')
