@@ -1,19 +1,8 @@
-#Transport Layer (orchestrator.py) Used to run the Flask API server.
-
 Flask
-
-#Brain (agent_client.py) the LLM provider. We use this for Gemini.
-
 google-generativeai
-
-#Zero-Trust Protocol (agent_client.py) Required for Ed25519 key loading and signature verification.
-
 cryptography
-
-#Phase 3: Trust Directory Client (agent_client.py) Required to make HTTP calls to the Trust Directory.
-
 requests
-
 google-cloud-firestore
-
 google-cloud-secret-manager
+redis
+gunicorn

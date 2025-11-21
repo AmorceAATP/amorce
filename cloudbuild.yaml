@@ -1,5 +1,5 @@
-# CI/CD configuration file for the 'NATP' service (The Router)
-# Renamed to 'NATP' per User Request
+# CI/CD configuration file for the 'natp' service (The Router)
+# FIX: Image name must be lowercase 'natp'
 
 steps:
   # Step 1: Build the Docker image
@@ -7,29 +7,31 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/NATP:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/natp:$COMMIT_SHA'
       - '.'
 
   # Step 2: Push the image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/NATP:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/natp:$COMMIT_SHA'
 
-  # Step 3: Deploy the new image to Cloud Run
+  # Step 3: Deploy to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - 'run'
       - 'deploy'
-      - 'NATP' # Service Name
-      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/NATP:$COMMIT_SHA'
+      - 'natp' # Service Name (Lowercase mandatory)
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/natp:$COMMIT_SHA'
       - '--region=us-central1'
       - '--allow-unauthenticated'
-    # Secrets are linked to the service environment
+      # Injection des variables d'environnement vitales pour la Prod
+      - '--set-env-vars=TRUST_DIRECTORY_URL=https://amorce-trust-api-425870997313.us-central1.run.app,AGENT_API_KEY=sk-atp-amorce-dev-2024,AGENT_ID=e4b0c7c8-4b9f-4b0d-8c1a-2b9d1c9a0c1a,GCP_PROJECT_ID=amorce-prod-rgosselin,SECRET_NAME=atp-agent-private-key,REDIS_HOST=localhost'
+      # NOTE: Tu devras ajouter GOOGLE_API_KEY manuellement dans la console Cloud Run pour la sécurité,
+      # ou l'ajouter ici si tu l'acceptes dans le code source (déconseillé mais rapide).
 
-# Specify the final image to store
 images:
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/NATP:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/natp:$COMMIT_SHA'
 
 options:
   logging: CLOUD_LOGGING_ONLY
