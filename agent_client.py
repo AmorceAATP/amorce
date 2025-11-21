@@ -1,214 +1,260 @@
-import requests
-import os
-import time
-from cryptography.hazmat.primitives import hashes
-# Note: PSS Padding was for RSA. Ed25519 doesn't use it.
-# from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-from google.cloud import secretmanager  # New import
-import base64
+# --- AGENT CLIENT (AC) v3.1 (Secured) ---
+# Implements Athena's Briefing Task 2: Cryptographic task signing.
+# Security Audit Fix (v3.1): Strict environment variable enforcement.
+# This client handles the core conversation logic (NLU, NLG, Memory)
+# and cryptographically signs all outgoing tasks.
+
+import google.generativeai as genai
 import json
-from uuid import uuid4  # P-3 Import
-from datetime import datetime, UTC  # P-3 Import (Fixed)
+import os
+import re
+import base64
 
-# --- Configuration ---
-# P-1 Endpoint (Legacy test)
-ORCHESTRATOR_INVOKE_URL = "https://amorce-api-425870997313.us-central1.run.app/v1/agent/invoke"
-# P-3/P-6 Endpoint (New)
-ORCHESTRATOR_TRANSACT_URL = "https://amorce-api-425870997313.us-central1.run.app/v1/a2a/transact"
-
-# P-4: AGENT_ID is our agent's (Agent A) static UUID
-AGENT_ID = os.environ.get("AGENT_ID", "e4b0c7c8-4b9f-4b0d-8c1a-2b9d1c9a0c1a")
+# --- DEPENDENCIES ---
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.exceptions import InvalidSignature
 
 
-# L1 Security: API Key for the Orchestrator
-AGENT_API_KEY = os.environ.get("AGENT_API_KEY")
+# --- 1. CONFIGURATION (SECURED) ---
 
-# GCP Project ID where the secret is stored.
-GCP_PROJECT_ID = "amorce-prod-rgosselin"
-
-# L2 Security: Secret name for our Private Key
-SECRET_NAME = "atp-agent-private-key"
-
-# In-memory cache for the private key
-_private_key_cache = None
-
-
-def _get_key_from_secret_manager():
+def get_env_var(name):
     """
-    Fetches the private key from GCP Secret Manager.
-    This function is called once on startup.
+    Security Helper: Retrieves an environment variable or raises a fatal error.
+    Prevents the agent from running with missing secrets.
     """
-    global _private_key_cache
-    if _private_key_cache:
-        return _private_key_cache
-
-    try:
-        print(f"Loading private key from Secret Manager: {SECRET_NAME}...")
-        client = secretmanager.SecretManagerServiceClient()
-
-        # Build the resource name of the secret version
-        name = f"projects/{GCP_PROJECT_ID}/secrets/{SECRET_NAME}/versions/latest"
-
-        # Access the secret version
-        response = client.access_secret_version(request={"name": name})
-
-        # Extract the PEM data (in bytes)
-        pem_data = response.payload.data
-
-        # Load the key from the bytes (Ed25519 key)
-        _private_key_cache = serialization.load_pem_private_key(
-            pem_data,
-            password=None,
-            backend=default_backend()
-        )
-        print("Private key loaded into memory successfully.")
-        return _private_key_cache
-
-    except Exception as e:
-        print(f"CRITICAL ERROR: Failed to load private key from Secret Manager.")
-        print(f"Error: {e}")
-        raise
+    val = os.environ.get(name)
+    if not val:
+        raise ValueError(f"Security Error: Environment variable {name} is not set.")
+    return val
 
 
-def sign_message(message_body: dict) -> str:
-    """
-    Signs a message body (dict) using the in-memory Ed25519 private key.
-    """
-    private_key = _get_key_from_secret_manager()
+try:
+    # LLM API Key
+    GOOGLE_API_KEY = get_env_var("GEMINI_API_KEY")
+    genai.configure(api_key=GOOGLE_API_KEY)
 
-    # The message must be canonicalized for the signature to be consistent.
-    canonical_message = json.dumps(message_body, sort_keys=True).encode('utf-8')
+    # --- AGENT'S PRIVATE KEY (for signing) ---
+    AGENT_PRIVATE_KEY_PEM = get_env_var("AGENT_PRIVATE_KEY")
 
-    # Ed25519 `sign` method is simple and takes only the message data.
-    signature = private_key.sign(
-        canonical_message
+    # Load the PEM-formatted private key
+    # Ed25519 keys do not require a password
+    AGENT_PRIVATE_KEY = load_pem_private_key(
+        AGENT_PRIVATE_KEY_PEM.encode('utf-8'),
+        password=None
     )
 
-    # Return the signature as Base64 for HTTP transport
-    return base64.b64encode(signature).decode('utf-8')
+    print("--- CONFIGURATION SUCCESS: Keys loaded securely. ---")
+
+except Exception as e:
+    print(f"--- CONFIGURATION ERROR ---")
+    print(f"Error: {e}")
+    print("Please ensure GEMINI_API_KEY and AGENT_PRIVATE_KEY are set in your environment.")
+    exit(1)  # Fail fast
+
+# --- v3.0: TWO BRAINS (NLU and NLG) ---
+
+# --- NLU BRAIN (Phase 0) ---
+NLU_SYSTEM_PROMPT = """
+You are an expert NLU (Natural Language Understanding) agent for a travel agency.
+Your sole task is to update a JSON object based on the user's request.
+Respond with NOTHING but the final JSON.
+
+You will receive:
+1.  "Previous JSON State": The state of the conversation (can be empty {}).
+2.  "Current User Request": What the user just said.
+
+Your rules:
+- Identify the user's intent: 'SEARCH_FLIGHT', 'SEARCH_HOTEL', 'BOOK_ITEM', or 'CLARIFICATION'.
+- If the request is a *new* search (e.g., "Find me a hotel in Paris"),
+  ignore the previous state and create a NEW, complete JSON for this intent.
+- If the user request is a *response* (e.g., "From Paris", "on Dec 15th"),
+  USE the previous JSON state and ONLY ADD or MODIFY the information provided. The intent should be 'CLARIFICATION' or the one from the previous state.
+- If the user confirms a booking (e.g., "yes", "book it", "that's perfect, confirm"),
+  detect the 'BOOK_ITEM' intent.
+- Always report the booking_context from the previous state.
+
+Output JSON Structure:
+{
+  "intent": "SEARCH_FLIGHT" | "SEARCH_HOTEL" | "BOOK_ITEM" | "CLARIFICATION",
+  "parameters": {
+    "location": "CITY" (or null),
+    "departure_date": "YYYY-MM-DD" (or null),
+    "origin": "CITY_OR_IATA_CODE" (or null),
+    "destination": "CITY_OR_IATA_CODE" (or null),
+    "check_in_date": "YYYY-MM-DD" (or null),
+    "check_out_date": "YYYY-MM-DD" (or null)
+  },
+  "booking_context": {
+    "item_to_book": { "type": "flight" | "hotel" | null, "id": "ITEM_ID", "price": 123.45 },
+    "is_confirmed": false
+  }
+}
+"""
+
+nlu_generation_config = {
+    "temperature": 0.0,
+    "top_p": 1,
+    "top_k": 1,
+    "max_output_tokens": 2048,
+}
+
+MODEL_NAME_TO_USE = "gemini-2.5-flash"
+
+# NLU Model Initialization
+llm_nlu = genai.GenerativeModel(
+    model_name=MODEL_NAME_TO_USE,
+    generation_config=nlu_generation_config,
+    system_instruction=NLU_SYSTEM_PROMPT
+)
+
+# --- NLG BRAIN (Phase 2) ---
+NLG_SYSTEM_PROMPT = """
+You are a conversational, friendly, and helpful travel agent.
+Your task is to respond to the user based on the context provided.
+
+- Always be friendly and use a natural, engaging tone.
+- If the conversation state is incomplete, politely ask for the missing single piece of information.
+
+- If 'task_results' contains an error (e.g., {"error": "NO_RESULTS"}):
+    - Acknowledge the search but apologize for the lack of results.
+    - If the error is 'NO_RESULTS', suggest searching again with a slightly different query or date.
+    - If the error is 'SERVICE_ERROR', apologize and suggest retrying later or choosing an alternative service.
+
+- If 'task_results' contains successful results (e.g., flight at 650 EUR):
+    - Present the best result clearly.
+    - ALWAYS finish by asking a confirmation question to book it.
+    - (Example: "I found an Air France flight for 650€. Would you like me to book it?")
+
+- If a booking was just confirmed (task_results status is "BOOKING_CONFIRMED"):
+    - Confirm the booking to the user and include the confirmation code.
+    - (Example: "It's done! Your flight to Montreal is confirmed. Your code is XYZ123.")
+"""
+
+nlg_generation_config = {
+    "temperature": 0.7,
+    "top_p": 1,
+    "top_k": 1,
+    "max_output_tokens": 2048,
+}
+
+# NLG Model Initialization
+llm_nlg = genai.GenerativeModel(
+    model_name=MODEL_NAME_TO_USE,
+    generation_config=nlg_generation_config,
+    system_instruction=NLG_SYSTEM_PROMPT
+)
 
 
-def send_signed_request(action, text):
+# --- 2. AGENT FUNCTIONS ---
+
+def clean_json_string(s):
     """
-    (P-1 Test) Builds, signs, and sends a request to the /invoke endpoint.
+    Cleans the raw LLM output to keep only the valid JSON.
     """
-    print(f"Sending P-1 request to {ORCHESTRATOR_INVOKE_URL}...")
+    start_index = s.find('{')
+    end_index = s.rfind('}')
 
-    body = {
-        "agent_id": AGENT_ID,  # P-4: This is now a UUID
-        "action": action,
-        "text": text,
-        "timestamp": int(time.time())
-    }
+    if start_index != -1 and end_index != -1 and end_index > start_index:
+        return s[start_index:end_index + 1]
 
-    try:
-        signature = sign_message(body)
-    except Exception as e:
-        print(f"Failed to sign message: {e}")
-        return
-
-    headers = {
-        "X-Agent-Signature": signature,
-        "Content-Type": "application/json"
-    }
-
-    if AGENT_API_KEY:
-        headers["X-API-Key"] = AGENT_API_KEY
-    else:
-        print("CRITICAL: AGENT_API_KEY environment variable not set. Request will fail authentication.")
-        return
-
-    try:
-        response = requests.post(ORCHESTRATOR_INVOKE_URL, json=body, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            print("Orchestrator Response (Success):")
-            print(response.json())
-        else:
-            print(f"Orchestrator Response (Error {response.status_code}):")
-            print(response.text)
-
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to connect to orchestrator: {e}")
+    print(f"--- NLU WARNING: Could not clean JSON ---")
+    print(f"Raw Response: {s}")
+    return None
 
 
-def send_a2a_transaction(service_id: str, payload: dict):  # P-6.4: Changed 'query' to 'payload'
+# --- TASK SIGNING FUNCTION (Task 2) ---
+def _sign_task(task_object):
     """
-    (P-6 Test) Builds, signs, and sends a TransactionRequest to the /transact endpoint.
+    Signs a task object using the agent's private key (Ed25519)
+    and returns it in the new Zero-Trust format.
     """
-    print(f"Sending P-6 A2A request to {ORCHESTRATOR_TRANSACT_URL}...")
-
-    # This body MUST match the TransactionRequest schema (White Paper Sec 3.2)
-    body = {
-        "transaction_id": str(uuid4()),
-        "service_id": service_id,
-        "consumer_agent_id": AGENT_ID,  # P-4: This is now a UUID
-        "timestamp": datetime.now(UTC).isoformat(),
-        "payload": payload  # P-6.4: Use the provided payload object directly
-    }
+    if not task_object:
+        return None
 
     try:
-        # Sign the *entire* transaction body
-        signature = sign_message(body)
-    except Exception as e:
-        print(f"Failed to sign P-6 transaction: {e}")
-        return
+        # 1. Serialize the task object into a canonical JSON string.
+        # sort_keys=True ensures the key order is always the same.
+        # separators=(',', ':') removes whitespace for a compact representation.
+        # This is CRITICAL for a consistent signature.
+        task_json = json.dumps(task_object, sort_keys=True, separators=(',', ':')).encode('utf-8')
 
-    headers = {
-        "X-Agent-Signature": signature,  # L2 Security
-        "Content-Type": "application/json"
-    }
+        # 2. Sign the serialized JSON bytes using the loaded private key
+        signature = AGENT_PRIVATE_KEY.sign(task_json)
 
-    if AGENT_API_KEY:
-        headers["X-API-Key"] = AGENT_API_KEY  # L1 Security
-    else:
-        print("CRITICAL: AGENT_API_KEY environment variable not set. Request will fail authentication.")
-        return
+        # 3. Encode the binary signature in Base64 for safe JSON transport
+        signature_b64 = base64.b64encode(signature).decode('utf-8')
 
-    try:
-        response = requests.post(ORCHESTRATOR_TRANSACT_URL, json=body, headers=headers, timeout=10)
-
-        print(f"Orchestrator A2A Response (Status: {response.status_code}):")
-        # Use json.dumps for pretty printing the JSON response
-        print(json.dumps(response.json(), indent=2))
-
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to connect to orchestrator (A2A): {e}")
-
-
-if __name__ == "__main__":
-    try:
-        # Load key once
-        _get_key_from_secret_manager()
-
-        # --- Test P-1 (Commented out) ---
-        # print("\n--- RUNNING P-1 (INVOKE) TEST (P-4 VALIDATION) ---")
-        # send_signed_request(
-        #     action="query_nlu",
-        #     text="What is the status of project Nexus?"
-        # )
-
-        # --- Test P-6 (NOW ACTIVE) ---
-        print("\n--- RUNNING P-6 (FAKE STORE API TRANSACT) TEST ---")
-
-        # Tâche P-6.2: This is the new Service ID for "product_retrieval"
-        TEST_SERVICE_ID = "bf8ba5d0-9337-41e3-8d96-1c593f5665c1"
-
-        # Tâche P-6.4: This is the new payload (must match the input_schema)
-        # We fetch product "1"
-        TEST_PAYLOAD = {
-            "product_id": "1"  # As required by Athéna (must be a string)
+        # 4. Wrap the original task and signature in the new format
+        signed_task_wrapper = {
+            "task": task_object,
+            "signature": signature_b64,
+            "algorithm": "Ed25519"  # As specified in the brief
         }
 
-        print(f"Running P-6 test with Service ID: {TEST_SERVICE_ID}")
-        print(f"Payload: {json.dumps(TEST_PAYLOAD)}")
-
-        send_a2a_transaction(
-            service_id=TEST_SERVICE_ID,
-            payload=TEST_PAYLOAD
-        )
+        print(f"--- INFO: Task successfully signed (Sig: {signature_b64[:10]}...) ---")
+        return signed_task_wrapper
 
     except Exception as e:
-        print(f"Agent failed to start: {e}")
+        print(f"--- CRITICAL SIGNING ERROR ---")
+        print(f"Failed to sign task: {e}")
+        # If signing fails, we must not send the task.
+        return None
+
+
+def nlu_phase_llm(user_prompt, previous_state):
+    """
+    Phase 0: NLU (Natural Language Understanding) - v3.0
+    """
+    print("--- 0. NLU PHASE (v3.0 NLU Brain) ---")
+    print(f"User prompt: \"{user_prompt}\"")
+
+    nlu_context = f"""
+    Previous JSON State:
+    {json.dumps(previous_state, indent=2)}
+    Current User Request:
+    "{user_prompt}"
+    Updated JSON:
+    """
+
+    print(f"Contacting Gemini API (NLU) with model '{MODEL_NAME_TO_USE}'...")
+
+    try:
+        response = llm_nlu.generate_content(nlu_context)
+        raw_text = response.text
+    except Exception as e:
+        print(f"\n--- UNEXPECTED ERROR during NLU Phase ---")
+        print(f"Error: {e}")
+        return previous_state
+
+    json_string = clean_json_string(raw_text)
+    if not json_string:
+        print(f"--- NLU ERROR: Non-JSON or malformed response received ---")
+        print(f"Raw Response: {raw_text}")
+        return previous_state
+
+    try:
+        updated_state = json.loads(json_string)
+
+        # Persistence logic for the booking context
+        if previous_state.get("booking_context", {}).get("item_to_book") and \
+                not updated_state.get("booking_context", {}).get("item_to_book") and \
+                updated_state.get("intent") != "BOOK_ITEM":
+            print("--- INFO: Manually reporting 'item_to_book' in state.")
+            if "booking_context" not in updated_state:
+                updated_state["booking_context"] = {}
+            updated_state["booking_context"]["item_to_book"] = previous_state["booking_context"]["item_to_book"]
+
+        print("Intent successfully updated:")
+        print(json.dumps(updated_state, indent=2))
+        return updated_state
+    except json.JSONDecodeError:
+        print(f"--- NLU ERROR: Invalid JSON after cleanup ---")
+        print(f"Cleaned JSON (attempt): {json_string}")
+        return previous_state
+
+
+def core_processing_phase(conversation_state):
+    """
+    Phase 1: Core Processing (Task Preparation
