@@ -1,0 +1,152 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Nexus Agent Transaction Protocol (NATP)",
+    "description": "The official API for the Nexus Agent Economy. Allows Autonomous Agents to discover, negotiate, and transact securely.",
+    "version": "1.3.0",
+    "contact": {
+      "name": "Nexus Support",
+      "email": "support@amorce.io"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://natp-425870997313.us-central1.run.app",
+      "description": "Production Server (Google Cloud Run)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "A2A",
+      "description": "Agent-to-Agent Transaction Layer (High Security)"
+    },
+    {
+      "name": "Bridge",
+      "description": "No-Code Gateway for Bubble/Make integrations"
+    }
+  ],
+  "paths": {
+    "/v1/a2a/transact": {
+      "post": {
+        "tags": ["A2A"],
+        "summary": "Execute a Secure Transaction",
+        "description": "The core endpoint. Receives a signed envelope, verifies identity (L2), checks HITL compliance, bills the ledger, and routes to the provider.",
+        "security": [
+          {
+            "ApiKeyAuth": [],
+            "AgentSignature": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NexusEnvelope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transaction Successful. Ledger updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionResponse"
+                }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized (Invalid API Key or Signature)" },
+          "403": { "description": "Forbidden (Identity mismatch or HITL Violation)" },
+          "429": { "description": "Rate Limit Exceeded (Max 10 req/min)" },
+          "500": { "description": "Internal Server Error" }
+        }
+      }
+    },
+    "/v1/nexus/bridge": {
+      "post": {
+        "tags": ["Bridge"],
+        "summary": "No-Code Proxy",
+        "description": "Allows tools like Bubble to transact without managing Ed25519 keys. The Bridge signs on their behalf using a managed identity.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transaction executed via Proxy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "L1 Security: Your Agent API Key"
+      },
+      "AgentSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Agent-Signature",
+        "description": "L2 Security: Ed25519 Signature of the canonical JSON body"
+      }
+    },
+    "schemas": {
+      "NexusEnvelope": {
+        "type": "object",
+        "required": ["transaction_id", "service_id", "consumer_agent_id", "timestamp", "payload"],
+        "properties": {
+          "transaction_id": { "type": "string", "format": "uuid" },
+          "service_id": { "type": "string", "format": "uuid" },
+          "consumer_agent_id": { "type": "string", "format": "uuid" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "payload": {
+            "type": "object",
+            "description": "The business logic payload (e.g. product_id). For commits, must include 'human_approval_token'."
+          }
+        }
+      },
+      "BridgeRequest": {
+        "type": "object",
+        "required": ["service_id", "payload"],
+        "properties": {
+          "service_id": { "type": "string", "format": "uuid" },
+          "payload": { "type": "object" }
+        }
+      },
+      "TransactionResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "success" },
+          "transaction_id": { "type": "string", "format": "uuid" },
+          "result": { "type": "object", "description": "Data returned by the Provider" }
+        }
+      }
+    }
+  }
+}

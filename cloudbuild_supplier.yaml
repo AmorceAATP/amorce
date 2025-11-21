@@ -1,0 +1,11 @@
+steps:
+  # Build l'image en utilisant Dockerfile.supplier
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [ 'build', '-t', 'gcr.io/$PROJECT_ID/supplier-agent', '-f', 'Dockerfile.supplier', '.' ]
+
+  # Pousse l'image vers le registre
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [ 'push', 'gcr.io/$PROJECT_ID/supplier-agent' ]
+
+images:
+  - 'gcr.io/$PROJECT_ID/supplier-agent'
