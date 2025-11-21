@@ -1,11 +1,11 @@
-# --- ORCHESTRATOR (Nexus NATP v1.2) ---
-# STATUS: PRODUCTION READY
-# Features Included:
-# - L1 Security: API Key (X-API-Key)
-# - L2 Security: Ed25519 Signature Verification
-# - Bridge: No-Code Gateway via Smart Agent (FR-O1)
-# - HITL: Human-In-The-Loop Validation (FR-P1)
-# - Metering: Firestore Ledger Logging (FR-O3)
+# --- ORCHESTRATOR (Nexus NATP v1.3 - FINAL) ---
+# STATUS: GOLD MASTER (Commercial Release)
+# Features:
+# - L1/L2 Security (Auth & Signature)
+# - Bridge (No-Code Gateway)
+# - HITL (Human Validation)
+# - Metering (Firestore Ledger)
+# - Rate Limiting (Redis Token Bucket) - NEW (FR-O4)
 
 import os
 import json
@@ -18,96 +18,79 @@ from uuid import uuid4
 from functools import wraps
 from typing import Callable, Any, Optional, Dict
 
-# --- Cryptography Imports ---
+# --- External Libs ---
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.exceptions import InvalidSignature
-
-# --- Google Cloud Imports ---
 from google.cloud import firestore
+import redis  # NEW
 from flask import Flask, request, jsonify, g
 
-# --- IMPORT DU SMART AGENT (Pour le Bridge) ---
+# --- Modules ---
 import smart_agent as agent
 
-# --- Global Configuration ---
+# --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app = Flask(__name__)
 
-# --- CRITICAL: Load Security Variables ---
 TRUST_DIRECTORY_URL = os.environ.get("TRUST_DIRECTORY_URL")
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY")
+# Configuration Redis (Défaut: localhost)
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
-if not TRUST_DIRECTORY_URL:
-    logging.warning("TRUST_DIRECTORY_URL not set. Signature verification will fail.")
-if not AGENT_API_KEY:
-    logging.warning("AGENT_API_KEY environment variable not set. API will be insecure.")
+if not TRUST_DIRECTORY_URL or not AGENT_API_KEY:
+    logging.warning("CRITICAL: Missing Security Env Vars.")
 
-# --- P-2: Database Connection (Ledger) ---
-# On initialise Firestore pour le metering (FR-O3)
+# --- DB CONNECTIONS ---
+
+# 1. Firestore (Metering)
 try:
     db_client = firestore.Client(project="amorce-prod-rgosselin")
-    logging.info("Firestore Client Initialized for Metering.")
+    logging.info("✅ Firestore (Ledger): Connected")
 except Exception as e:
-    logging.warning(f"Firestore init failed (Metering will be disabled): {e}")
+    logging.warning(f"⚠️ Firestore Error: {e} (Metering Disabled)")
     db_client = None
 
+# 2. Redis (Rate Limiting) - FR-O4
+try:
+    # Socket timeout court (100ms) pour ne pas ralentir l'API si Redis est down
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, socket_connect_timeout=0.1)
+    redis_client.ping()  # Test connection
+    logging.info("✅ Redis (Rate Limit): Connected")
+except Exception as e:
+    logging.warning(f"⚠️ Redis Error: {e} (Rate Limiting Disabled - Traffic Allowed)")
+    redis_client = None
 
-# --- Authentication Decorator (Security Layer 1) ---
+
+# --- DECORATORS & HELPERS ---
+
 def require_api_key(f: Callable) -> Callable:
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not AGENT_API_KEY:
-            logging.warning("Bypassing API key check (server key not set).")
-            return f(*args, **kwargs)
-
+        if not AGENT_API_KEY: return f(*args, **kwargs)
         key = request.headers.get('X-API-Key')
         if not key or key != AGENT_API_KEY:
-            logging.warning(f"Unauthorized access attempt.")
             return jsonify({"error": "Unauthorized"}), 401
-
-        g.auth_source = f"Orchestrator"
+        g.auth_source = "Orchestrator"
         return f(*args, **kwargs)
 
     return decorated_function
 
 
-# --- P-4: Public Key Cache ---
+# Cache Agent Identity
 PUBLIC_KEY_CACHE: Dict[str, tuple] = {}
-CACHE_TTL_SECONDS = 300
 
 
-def get_agent_record(agent_id: str) -> Optional[dict]:
-    """Fetches Agent Record from Trust Directory."""
-    if not TRUST_DIRECTORY_URL:
-        return None
-
-    lookup_url = f"{TRUST_DIRECTORY_URL}/api/v1/lookup/{agent_id}"
-    try:
-        response = requests.get(lookup_url, timeout=3)
-        if response.status_code != 200:
-            return None
-        data = response.json()
-        if data.get("status") != "active":
-            return None
-        return data
-    except Exception as e:
-        logging.error(f"Agent lookup failed: {e}")
-        return None
-
-
-def get_public_key(agent_id: str) -> Optional[ed25519.Ed25519PublicKey]:
-    """Fetches and caches the public key."""
+def get_public_key(agent_id: str):
     cached = PUBLIC_KEY_CACHE.get(agent_id)
-    if cached and (time.time() - cached[1]) < CACHE_TTL_SECONDS:
-        return cached[0]
+    if cached and (time.time() - cached[1]) < 300: return cached[0]
 
-    record = get_agent_record(agent_id)
-    if not record:
-        return None
-
+    if not TRUST_DIRECTORY_URL: return None
     try:
-        pem = record.get("public_key")
+        resp = requests.get(f"{TRUST_DIRECTORY_URL}/api/v1/lookup/{agent_id}", timeout=3)
+        if resp.status_code != 200 or resp.json().get("status") != "active": return None
+        pem = resp.json().get("public_key")
         key = serialization.load_pem_public_key(pem.encode('utf-8'))
         PUBLIC_KEY_CACHE[agent_id] = (key, time.time())
         return key
@@ -115,153 +98,119 @@ def get_public_key(agent_id: str) -> Optional[ed25519.Ed25519PublicKey]:
         return None
 
 
-# --- Helper Functions (HITL & Metering) ---
+# --- CORE LOGIC ---
 
-def validate_hitl_compliance(body: dict):
+def check_rate_limit(agent_id: str, limit: int = 10, window: int = 60):
     """
-    (FR-P1) Enforces Human-In-The-Loop protocol.
+    (FR-O4) Rate Limiting via Redis.
+    Rule: Max 10 requests per minute per Agent ID.
     """
-    payload = body.get("payload", {})
-    intent = payload.get("intent")
+    if not redis_client:
+        return  # Fail Open
 
-    if intent == "transaction.commit":
-        token = payload.get("human_approval_token")
-        if not token:
-            logging.warning(f"HITL Violation: Agent attempted COMMIT without human token.")
-            raise ValueError("HITL Violation: 'transaction.commit' requires 'human_approval_token'.")
-        logging.info(f"HITL Compliance: Approval token present.")
-
-
-def log_transaction_to_ledger(tx_data: dict):
-    """
-    (FR-O3) Writes the transaction result to the Firestore Ledger.
-    """
-    if not db_client:
-        return
-
+    key = f"rate_limit:{agent_id}"
     try:
-        # Enregistrement asynchrone
-        doc_ref = db_client.collection("ledger").document(tx_data.get("transaction_id", "unknown"))
+        # Incrémente le compteur atomiquement
+        current_count = redis_client.incr(key)
 
-        record = tx_data.copy()
-        record["ingested_at"] = firestore.SERVER_TIMESTAMP
+        # Au premier appel, on fixe l'expiration (fenêtre glissante simple)
+        if current_count == 1:
+            redis_client.expire(key, window)
 
-        doc_ref.set(record)
-        logging.info(f"METERING: Transaction logged to Ledger.")
+        if current_count > limit:
+            logging.warning(f"⛔ RATE LIMIT EXCEEDED for {agent_id}: {current_count}/{limit}")
+            raise Exception(f"Rate limit exceeded ({limit} req/{window}s)")
+
+    except redis.RedisError as e:
+        logging.error(f"Redis Runtime Error: {e}")
+        # On laisse passer si Redis plante pendant l'incr
+
+
+def validate_hitl(body):
+    if body.get("payload", {}).get("intent") == "transaction.commit":
+        if not body.get("payload", {}).get("human_approval_token"):
+            raise ValueError("HITL Violation: Token required for COMMIT.")
+
+
+def log_ledger(tx_data):
+    if not db_client: return
+    try:
+        db_client.collection("ledger").document(tx_data["transaction_id"]).set({
+            **tx_data, "ingested_at": firestore.SERVER_TIMESTAMP
+        })
+        logging.info("💰 Ledger: Transaction recorded.")
     except Exception as e:
-        logging.error(f"METERING ERROR: Failed to write to ledger: {e}")
+        logging.error(f"Ledger Write Error: {e}")
 
 
-# --- API Endpoints ---
+# --- ENDPOINTS ---
 
 @app.route("/v1/a2a/transact", methods=["POST"])
 @require_api_key
 def a2a_transact():
-    """
-    Core A2A Routing Endpoint with HITL & Metering.
-    """
     try:
         body = request.json
-        signature_b64 = request.headers.get('X-Agent-Signature')
-        consumer_id = body.get("consumer_agent_id")
+        sig = request.headers.get('X-Agent-Signature')
+        consumer = body.get("consumer_agent_id")
 
-        if not all([body, signature_b64, consumer_id]):
-            return jsonify({"error": "Malformed request"}), 400
+        if not all([body, sig, consumer]): return jsonify({"error": "Bad Request"}), 400
 
-        # 1. L2 Verification
-        pub_key = get_public_key(consumer_id)
-        if not pub_key:
-            return jsonify({"error": "Identity verification failed"}), 403
+        # 1. RATE LIMITING (FR-O4) - First line of defense
+        try:
+            check_rate_limit(consumer)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 429  # Too Many Requests
+
+        # 2. SECURITY (L2 & HITL)
+        pub_key = get_public_key(consumer)
+        if not pub_key: return jsonify({"error": "Identity Failed"}), 403
 
         try:
-            # Correction: Encodage propre sur une seule ligne
-            canonical = json.dumps(body, sort_keys=True).encode('utf-8')
-            sig_bytes = base64.b64decode(signature_b64)
-            pub_key.verify(sig_bytes, canonical)
-        except InvalidSignature:
-            return jsonify({"error": "Invalid Signature"}), 401
-
-        # 2. HITL Enforcement (FR-P1)
-        try:
-            validate_hitl_compliance(body)
-        except ValueError as e:
+            pub_key.verify(base64.b64decode(sig), json.dumps(body, sort_keys=True).encode('utf-8'))
+            validate_hitl(body)
+        except (InvalidSignature, ValueError) as e:
             return jsonify({"error": str(e)}), 403
 
-        # 3. Routing Logic (P-6)
-        service_id = body.get("service_id")
-        service_url = f"{TRUST_DIRECTORY_URL}/api/v1/services/{service_id}"
-
-        srv_resp = requests.get(service_url, timeout=3)
-        if srv_resp.status_code != 200:
-            return jsonify({"error": "Service not found"}), 404
+        # 3. ROUTING (P-6)
+        srv_id = body.get("service_id")
+        srv_resp = requests.get(f"{TRUST_DIRECTORY_URL}/api/v1/services/{srv_id}", timeout=3)
+        if srv_resp.status_code != 200: return jsonify({"error": "Service Not Found"}), 404
 
         contract = srv_resp.json()
-        provider_id = contract.get("provider_agent_id")
+        prov_resp = requests.get(f"{TRUST_DIRECTORY_URL}/api/v1/lookup/{contract['provider_agent_id']}", timeout=3)
+        if prov_resp.status_code != 200: return jsonify({"error": "Provider Not Found"}), 404
 
-        # Get Provider Endpoint
-        prov_record = get_agent_record(provider_id)
-        if not prov_record:
-            return jsonify({"error": "Provider not found"}), 404
+        # Execute
+        endpoint = prov_resp.json()["metadata"]["api_endpoint"]
+        path = contract["metadata"]["service_path_template"].format(**body.get("payload", {}))
+        ext_resp = requests.get(f"{endpoint}{path}", timeout=10)
 
-        endpoint = prov_record["metadata"]["api_endpoint"]
-        template = contract["metadata"]["service_path_template"]
-
-        # External Call
-        payload = body.get("payload", {})
-        final_url = f"{endpoint}{template.format(**payload)}"
-
-        ext_resp = requests.get(final_url, timeout=10)
-
-        # 4. Prepare Response & Metering
-        result_data = {
+        # 4. METERING (FR-O3)
+        result = {
             "transaction_id": body.get("transaction_id"),
             "status": "success",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "result": ext_resp.json()
         }
-
-        # 5. Metering (FR-O3) - Enregistrement dans le Grand Livre
-        log_transaction_to_ledger(result_data)
-
-        return jsonify(result_data), 200
-
-    except Exception as e:
-        logging.error(f"A2A Error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-# --- NEW: NEXUS BRIDGE ENDPOINT (FR-O1) ---
-@app.route('/v1/nexus/bridge', methods=['POST'])
-@require_api_key
-def nexus_bridge():
-    """
-    The Nexus Bridge Endpoint.
-    Allows No-Code tools to transact via Smart Agent.
-    """
-    try:
-        req_data = request.json
-        if not req_data:
-            return jsonify({"error": "Missing JSON payload"}), 400
-
-        service_id = req_data.get("service_id")
-        payload = req_data.get("payload")
-
-        if not service_id or not payload:
-            return jsonify({"error": "Missing 'service_id' or 'payload'"}), 400
-
-        logging.info(f"BRIDGE: Delegating to Smart Agent for Service {service_id}")
-
-        # Delegated Execution via Smart Agent
-        result = agent.run_bridge_transaction(service_id, payload)
+        log_ledger(result)
 
         return jsonify(result), 200
 
     except Exception as e:
-        logging.error(f"Bridge Error: {e}")
+        logging.error(f"System Error: {e}")
+        return jsonify({"error": "Internal Error"}), 500
+
+
+@app.route('/v1/nexus/bridge', methods=['POST'])
+@require_api_key
+def nexus_bridge():
+    # Bridge uses managed identity, so we Rate Limit based on Service ID or Global
+    # For V1, simple pass-through
+    try:
+        return jsonify(agent.run_bridge_transaction(request.json.get("service_id"), request.json.get("payload"))), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# --- END NEXUS BRIDGE ---
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
