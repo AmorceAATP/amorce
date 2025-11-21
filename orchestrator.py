@@ -98,6 +98,28 @@ def get_public_key(agent_id: str) -> Optional[ed25519.Ed25519PublicKey]:
         return None
 
 # --- API Endpoints ---
+def validate_hitl_compliance(body: dict):
+    """
+    (FR-P1) Enforces Human-In-The-Loop protocol for sensitive transactions.
+    Rules:
+    1. If intent is 'transaction.commit', a 'human_approval_token' MUST be present.
+    """
+    # On récupère le payload interne
+    payload = body.get("payload", {})
+
+    # On cherche l'intent (soit dans le payload, soit c'est implicite par le contexte)
+    # Note: Dans la V1, on surveille spécifiquement les intents critiques
+    intent = payload.get("intent")
+
+    # Si c'est un engagement financier (COMMIT), on exige l'humain
+    if intent == "transaction.commit":
+        token = payload.get("human_approval_token")
+        if not token:
+            logging.warning(f"HITL Violation: Agent attempted COMMIT without human token.")
+            raise ValueError("HITL Violation: 'transaction.commit' requires 'human_approval_token'.")
+
+        logging.info(f"HITL Compliance: Approval token present for transaction.")
+
 
 @app.route("/v1/a2a/transact", methods=["POST"])
 @require_api_key
@@ -124,7 +146,23 @@ def a2a_transact():
             pub_key.verify(sig_bytes, canonical)
         except InvalidSignature:
             return jsonify({"error": "Invalid Signature"}), 401
+        try:
+            canonical = json.dumps(body, sort_keys=True).encode('utf-8')
+            sig_bytes = base64.b64decode(signature_b64)
+            pub_key.verify(sig_bytes, canonical)
+        except InvalidSignature:
+            return jsonify({"error": "Invalid Signature"}), 401
 
+            # --- BEGIN BLOC HITL (new) ---
+            # HITL Enforcement (FR-P1)
+        try:
+            validate_hitl_compliance(body)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 403
+            # --- END BLOC HITL ---
+
+            # Routing Logic (P-6)
+        service_id = body.get("service_id")
         # Routing Logic (P-6)
         service_id = body.get("service_id")
         service_url = f"{TRUST_DIRECTORY_URL}/api/v1/services/{service_id}"
