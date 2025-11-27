@@ -1,3 +1,4 @@
+"""
 # --- ORCHESTRATOR (Nexus NATP v1.4 - System Lib) ---
 # STATUS: REFACTORED (Ticket-CODE-02)
 # Changes:
@@ -5,6 +6,7 @@
 # - Now imports 'nexus' as a system library.
 # - Uses IdentityManager.verify_signature() for L2.
 # - Uses IdentityManager.get_canonical_json_bytes() for consistency.
+"""
 
 import os
 import logging
