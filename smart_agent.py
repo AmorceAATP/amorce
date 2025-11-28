@@ -27,6 +27,8 @@ SECRET_NAME = os.environ.get("SECRET_NAME", "atp-agent-private-key")
 AGENT_ID = os.environ.get("AGENT_ID", "e4b0c7c8-4b9f-4b0d-8c1a-2b9d1c9a0c1a")
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY")
 
+logger.info(f"DEBUG: Client loaded AGENT_API_KEY (First 8 chars): {AGENT_API_KEY[:8] if AGENT_API_KEY else 'NONE/EMPTY'}")
+
 # Network Configuration
 TRUST_DIRECTORY_URL = os.environ.get("TRUST_DIRECTORY_URL")
 ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL")
@@ -49,7 +51,7 @@ def get_nexus_client() -> NexusClient:
     if _nexus_client:
         return _nexus_client
 
-    # 1. Load Identity (L2)
+    # --- 1. LOAD IDENTITY (Partie qui manquait) ---
     if not _identity_manager:
         logger.info(f"🔐 Loading identity from Secret Manager: {SECRET_NAME}...")
         try:
@@ -61,6 +63,7 @@ def get_nexus_client() -> NexusClient:
         except Exception as e:
             logger.critical(f"Failed to load identity: {e}")
             raise
+    # ----------------------------------------------
 
     # 2. Initialize Client
     logger.info("🔌 Initializing Nexus Client...")
@@ -68,8 +71,8 @@ def get_nexus_client() -> NexusClient:
         identity=_identity_manager,
         directory_url=TRUST_DIRECTORY_URL,
         orchestrator_url=ORCHESTRATOR_URL,
-        agent_id=AGENT_ID,
-        api_key=AGENT_API_KEY
+        api_key=AGENT_API_KEY,
+        agent_id=AGENT_ID
     )
     return _nexus_client
 

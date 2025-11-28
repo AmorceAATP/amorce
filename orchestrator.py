@@ -45,7 +45,8 @@ if not TRUST_DIRECTORY_URL or not AGENT_API_KEY:
 
 # 1. Firestore (Metering)
 try:
-    db_client = firestore.Client(project="amorce-prod-rgosselin")
+    project_id = os.environ.get("GCP_PROJECT_ID", "amorce-prod-rgosselin")
+    db_client = firestore.Client(project=project_id)
     logging.info("✅ Firestore (Ledger): Connected")
 except Exception as e:
     logging.warning(f"⚠️ Firestore Error: {e} (Metering Disabled)")

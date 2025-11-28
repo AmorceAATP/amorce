@@ -6,6 +6,5 @@ google-cloud-firestore
 google-cloud-secret-manager
 redis
 gunicorn
-fastapi
-uvicorn
 pydantic
+./nexus_py_sdk

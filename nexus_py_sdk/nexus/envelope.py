@@ -12,6 +12,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from .crypto import IdentityManager
 
+# --- Constants ---
+class PriorityLevel:
+    """Enumeration of valid priority levels for easier developer access."""
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 # --- NATP Data Models ---
 
@@ -34,7 +40,16 @@ class NexusEnvelope(BaseModel):
     All transactions MUST use this structure.
     """
     natp_version: str = Field("0.1.0", description="Protocol version.")
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique message ID.")
+
+    # Priority Lane (v0.1.2) - CRITICAL MODIFICATION
+    priority: str = Field(
+        PriorityLevel.NORMAL,
+        pattern="^(normal|high|critical)$",
+        description="Routing priority. Critical messages bypass rate limits."
+    )
+
     timestamp: float = Field(default_factory=lambda: time.time(), description="Unix timestamp (UTC).")
 
     sender: SenderInfo
@@ -89,3 +104,6 @@ class NexusEnvelope(BaseModel):
             canonical_bytes,
             self.signature
         )
+
+# DX ALIAS: Required for legacy imports looking for 'Envelope' directly in this module
+Envelope = NexusEnvelope

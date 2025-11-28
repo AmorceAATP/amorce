@@ -1,5 +1,6 @@
 setup.py
 nexus/__init__.py
+nexus/client.py
 nexus/crypto.py
 nexus/envelope.py
 nexus_py_sdk.egg-info/PKG-INFO

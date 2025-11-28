@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: nexus-py-sdk
-Version: 0.1.0
+Version: 0.1.7
 Summary: Official Python SDK for the Nexus Agent Transaction Protocol (NATP)
 Author: Athena Architecture
 Requires-Python: >=3.9

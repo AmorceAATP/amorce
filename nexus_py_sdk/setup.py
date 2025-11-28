@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nexus-py-sdk",
-    version="0.1.0",
+    version="0.1.7",  # BUMP: Align with priority lane and latest features
     description="Official Python SDK for the Nexus Agent Transaction Protocol (NATP)",
     author="Athena Architecture",
     packages=find_packages(),
