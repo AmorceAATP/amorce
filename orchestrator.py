@@ -231,7 +231,7 @@ def a2a_transact():
         path = path_template.format(**body.get("payload", {}))
 
         logging.info(f"Routing to Provider: {endpoint}{path}")
-        ext_resp = requests.get(f"{endpoint}{path}", timeout=10)
+        ext_resp = requests.post(f"{endpoint}{path}", json={"data": body.get("payload", {})}, timeout=10)
 
         # 4. METERING (FR-O3)
         result = {
