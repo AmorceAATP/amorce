@@ -12,11 +12,12 @@ COPY amorce_py_sdk/ ./amorce_py_sdk/
 
 # Install external requirements first to leverage Docker layer caching
 COPY requirements.txt .
+COPY requirements-cloud.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements-cloud.txt
 
 # Install the SDK as a system package.
 # This ensures 'import amorce' works globally from site-packages.
-# (Already installed via requirements.txt if listed there, but keeping explicit install is safe)
 RUN pip install --no-cache-dir ./amorce_py_sdk
 
 # --- 4. Application Code ---
