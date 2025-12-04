@@ -13,7 +13,10 @@ import asyncio
 import logging
 import requests
 import subprocess
+import time
 from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from typing import List, Dict, Any, Optional
 import sys
 import os
@@ -68,6 +71,15 @@ class MCPAgentWrapper:
         self.trust_directory_url = trust_directory_url or os.getenv('TRUST_DIRECTORY_URL')
         self.app = Flask(__name__)
         self.tools_cache: Optional[List[MCPTool]] = None
+        self.start_time = time.time()
+        
+        # Rate limiting
+        self.limiter = Limiter(
+            app=self.app,
+            key_func=get_remote_address,
+            default_limits=["100 per minute"],
+            storage_uri="memory://"  # Use Redis in production
+        )
         
         logger.info(f"Initializing MCP wrapper for {server_name}")
         logger.info(f"Orchestrator: {self.orchestrator_url}")
@@ -80,14 +92,33 @@ class MCPAgentWrapper:
         
         @self.app.route('/health', methods=['GET'])
         def health():
-            """Health check endpoint."""
+            """Enhanced health check endpoint with detailed status."""
+            mcp_status = "healthy"
+            mcp_connected = False
+            
+            # Check MCP server connection
+            try:
+                if self.mcp_client.process:
+                    mcp_connected = True
+            except Exception:
+                mcp_status = "degraded"
+            
+            uptime = int(time.time() - self.start_time)
+            
             return jsonify({
-                "status": "healthy",
+                "status": "healthy" if mcp_connected else "degraded",
                 "server": self.server_name,
-                "type": "mcp-wrapper"
+                "type": "mcp-wrapper",
+                "mcp_server": {
+                    "connected": mcp_connected,
+                    "status": mcp_status
+                },
+                "uptime_seconds": uptime,
+                "hitl_tools": self.require_hitl
             })
             
         @self.app.route('/v1/tools/list', methods=['POST'])
+        @self.limiter.limit("20 per minute")
         def list_tools():
             """
             List available MCP tools as Amorce services.
@@ -130,6 +161,7 @@ class MCPAgentWrapper:
                 return jsonify({"error": f"Internal error: {str(e)}"}), 500
                 
         @self.app.route('/v1/tools/call', methods=['POST'])
+        @self.limiter.limit("10 per minute")
         def call_tool():
             """
             Execute MCP tool via AATP.
