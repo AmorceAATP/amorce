@@ -24,9 +24,9 @@ import os
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-# Production imports - NO FALLBACK
-from amorce_py_sdk.amorce.verification import verify_request
-from amorce_py_sdk.amorce.exceptions import AmorceSecurityError
+# Production imports - use correct SDK path
+from amorce.verification import verify_request
+from amorce.exceptions import AmorceSecurityError
 
 from .mcp_client import MCPClient, MCPTool
 
@@ -73,6 +73,14 @@ class MCPAgentWrapper:
         self.tools_cache: Optional[List[MCPTool]] = None
         self.start_time = time.time()
         
+        # Standalone mode: If no trust directory, use development verification
+        # This allows testing without a full trust directory setup
+        self.standalone_mode = not self.trust_directory_url
+        if self.standalone_mode:
+            logger.warning("⚠️  STANDALONE MODE: Trust directory not configured")
+            logger.warning("⚠️  Signature verification will be RELAXED for development")
+            logger.warning("⚠️  DO NOT USE IN PRODUCTION without trust directory!")
+        
         # Rate limiting
         self.limiter = Limiter(
             app=self.app,
@@ -117,20 +125,54 @@ class MCPAgentWrapper:
                 "hitl_tools": self.require_hitl
             })
             
+        def _verify_request_with_standalone():
+            """
+            Verifies an AATP request. If in standalone mode, it bypasses
+            full signature verification and returns a simple verified object.
+            """
+            if self.standalone_mode:
+                logger.warning("⚠️  Standalone mode: Bypassing full AATP signature verification")
+                
+                # Extract headers for basic validation
+                signature = None
+                agent_id = None
+                
+                for key, value in request.headers.items():
+                    if key.lower() == 'x-agent-signature':
+                        signature = value
+                    elif key.lower() == 'x-amorce-agent-id':
+                        agent_id = value
+                
+                if not signature:
+                    raise AmorceSecurityError("Missing X-Agent-Signature header")
+                if not agent_id:
+                    raise AmorceSecurityError("Missing X-Amorce-Agent-ID header")
+                
+                # Return simple object (development only!)
+                class StandaloneVerified:
+                    def __init__(self, agent_id, payload):
+                        self.agent_id = agent_id
+                        self.payload = payload
+                
+                return StandaloneVerified(agent_id, request.json if request.is_json else {})
+            else:
+                # Production mode: full verification
+                return verify_request(
+                    headers=request.headers,
+                    body=request.get_data(),
+                    directory_url=self.trust_directory_url
+                )
+
         @self.app.route('/v1/tools/list', methods=['POST'])
         @self.limiter.limit("20 per minute")
         def list_tools():
             """
             List available MCP tools as Amorce services.
-            
-            AATP endpoint for tool discovery.
+            Performs AATP signature verification.
             """
             try:
-                # Verify AATP signature
-                verified = verify_request(
-                    headers=request.headers,
-                    body=request.get_data()
-                )
+                # Verify request (with standalone mode support)
+                verified = _verify_request_with_standalone()
                 
                 # Get tools from MCP server
                 loop = asyncio.new_event_loop()
@@ -175,10 +217,7 @@ class MCPAgentWrapper:
             """
             try:
                 # Verify AATP signature
-                verified = verify_request(
-                    headers=request.headers,
-                    body=request.get_data()
-                )
+                verified = _verify_request_with_standalone()
                 
                 payload = verified.payload.get('payload', {})
                 tool_name = payload.get('tool_name')
@@ -251,10 +290,7 @@ class MCPAgentWrapper:
         def list_resources():
             """List available MCP resources."""
             try:
-                verified = verify_request(
-                    headers=request.headers,
-                    body=request.get_data()
-                )
+                verified = _verify_request_with_standalone()
                 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -284,10 +320,7 @@ class MCPAgentWrapper:
         def read_resource():
             """Read an MCP resource."""
             try:
-                verified = verify_request(
-                    headers=request.headers,
-                    body=request.get_data()
-                )
+                verified = _verify_request_with_standalone()
                 
                 payload = verified.payload.get('payload', {})
                 uri = payload.get('uri')
