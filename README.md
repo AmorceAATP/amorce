@@ -51,6 +51,37 @@ That's it! Your local Amorce runtime is ready.
 
 ---
 
+## 🔌 MCP Wrapper - Production Ready ✅
+
+**Status:** 95-100% Production Ready | Comprehensively Tested
+
+Amorce provides a production-ready wrapper for [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers, adding cryptographic security and human-in-the-loop oversight to 80+ MCP tools.
+
+### Quick MCP Start
+
+```bash
+# Start MCP wrapper with filesystem server
+AMORCE_ENV=production python3 run_mcp_wrappers.py filesystem
+
+# Use MCP tools with security
+from amorce import IdentityManager, MCPToolClient
+identity = IdentityManager.generate_ephemeral()
+mcp = MCPToolClient(identity, "http://localhost:5001")
+
+# Read file (instant)
+result = mcp.call_tool('filesystem', 'read_file', {'path': '/tmp/data.txt'})
+
+# Write file (requires human approval)
+approval_id = mcp.request_approval('filesystem', 'write_file', {...})
+result = mcp.call_tool('filesystem', 'write_file', {'path': '/tmp/output.txt'}, approval_id)
+```
+
+**Features:** Ed25519 signatures on every call | HITL approvals for sensitive ops | 3-9ms response times | 80+ servers available
+
+📚 **[Complete MCP Guide →](#mcp-wrapper-production-ready-)** | **[MCP Docs](https://amorce.io/docs/guides/mcp-integration)**
+
+---
+
 ## 🏗️ Architecture
 
 Amorce is a **modular runtime** with pluggable components:
@@ -529,6 +560,8 @@ Implements **AATP v1.0.0** (Amorce Agent Transaction Protocol):
 ---
 
 ## 🔌 MCP Wrapper - Production Ready ✅
+
+**Complete Model Context Protocol Integration**
 
 **Status:** 95-100% Production Ready | Comprehensively Tested | Deployment Ready
 
