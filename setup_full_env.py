@@ -9,8 +9,14 @@ GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "amorce-prod-rgosselin")
 SECRET_NAME = os.environ.get("SECRET_NAME", "atp-agent-private-key")
 DIRECTORY_URL = os.environ.get("TRUST_DIRECTORY_URL", "https://amorce-trust-api-425870997313.us-central1.run.app")
 
-# --- LA BONNE CLÉ L1 (Corrigée) ---
-ADMIN_KEY = "sk-admin-amorce-2025-secure-reset"
+# --- Admin Key from Environment Variable (SECURE) ---
+ADMIN_KEY = os.environ.get("DIRECTORY_ADMIN_KEY")
+if not ADMIN_KEY:
+    raise ValueError(
+        "DIRECTORY_ADMIN_KEY environment variable must be set. "
+        "Set it via: export DIRECTORY_ADMIN_KEY='your-admin-key' "
+        "or retrieve from Secret Manager."
+    )
 
 # L'UUID officiel de votre agent (de votre liste validée)
 OFFICIAL_AGENT_UUID = "0b631b00-6668-42c1-a0af-2c8cf565d7f2"
