@@ -1,5 +1,10 @@
 # 🤖 Amorce Core (Runtime & Orchestrator)
 
+[![GitHub release](https://img.shields.io/github/v/release/trebortGolin/amorce)](https://github.com/trebortGolin/amorce/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Live Demo](https://img.shields.io/badge/demo-marketplace-success.svg)](https://github.com/trebortGolin/agent-marketplace-demo)
+
 **The open-source runtime for secure AI agent-to-agent transactions.**
 
 Amorce is like Docker for AI agents: run it locally for development, or use Amorce Cloud for production hosting.
