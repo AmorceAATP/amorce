@@ -151,7 +151,7 @@ Connect to Amorce Cloud for global agent discovery and managed services.
 ```bash
 # .env
 AMORCE_MODE=cloud
-TRUST_DIRECTORY_URL=https://amorce-trust-api.run.app
+TRUST_DIRECTORY_URL=https://trust.amorce.io
 AGENT_API_KEY=sk-atp-your-key
 
 # Install cloud dependencies
@@ -493,7 +493,7 @@ docker run -p 8080:8080 \
 # Run (cloud)
 docker run -p 8080:8080 \
   -e AMORCE_MODE=cloud \
-  -e TRUST_DIRECTORY_URL=https://... \
+  -e TRUST_DIRECTORY_URL=https://trust.amorce.io \
   -e AGENT_API_KEY=sk-atp-... \
   amorce:latest
 ```

@@ -44,7 +44,7 @@ docker run -d \
   --name amorce-orchestrator \
   -p 8080:8080 \
   -e AMORCE_MODE=cloud \
-  -e TRUST_DIRECTORY_URL=https://amorce-trust-api.run.app \
+  -e TRUST_DIRECTORY_URL=https://trust.amorce.io \
   -e AGENT_API_KEY=sk-atp-your-key \
   amorce:latest
 ```
