@@ -8,11 +8,8 @@ substitutions:
 # -----------------------------------------------
 
 # --- Secret Manager Configuration ---
-# Allows Cloud Build to access secrets from Secret Manager
-availableSecrets:
-  secretManager:
-  - versionName: projects/${PROJECT_ID}/secrets/AGENT_API_KEY/versions/latest
-    env: 'AGENT_API_KEY'
+# NOTE: Secrets are now managed directly in Cloud Run console
+# AGENT_API_KEY is set as a Cloud Run secret reference
 # -----------------------------------------------
 
 steps:
