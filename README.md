@@ -11,7 +11,21 @@ Amorce is like Docker for AI agents: run it locally for development, or use Amor
 
 ---
 
-## 🚀 Quick Start (5 Minutes)
+## 🔍 LLM Discovery (NEW)
+
+**Major LLMs can now discover Amorce agents automatically.**
+
+| LLM | Discovery Method | Status |
+|-----|-----------------|--------|
+| **ChatGPT/GPT** | `amorce.io/.well-known/ai-plugin.json` | ✅ Live |
+| **Claude** | `npx @amorce/mcp-server` | ✅ Ready |
+| **Gemini** | `amorce.io/.well-known/openapi.json` | ✅ Live |
+| **All LLMs** | `amorce.io/llms.txt` | ✅ Live |
+
+**Try the API:**
+```bash
+curl "https://amorce-trust-api-425870997313.us-central1.run.app/api/v1/ans/search?q=book+flight+to+Paris"
+```
 
 ### Prerequisites
 - Python 3.11+
