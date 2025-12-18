@@ -1,9 +1,9 @@
 # 🤖 Amorce Core (Runtime & Orchestrator)
 
-[![GitHub release](https://img.shields.io/github/v/release/trebortGolin/amorce)](https://github.com/trebortGolin/amorce/releases)
+[![GitHub release](https://img.shields.io/github/v/release/AmorceAATP/amorce)](https://github.com/AmorceAATP/amorce/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Live Demo](https://img.shields.io/badge/demo-marketplace-success.svg)](https://github.com/trebortGolin/agent-marketplace-demo)
+[![Live Demo](https://img.shields.io/badge/demo-marketplace-success.svg)](https://github.com/AmorceAATP/agent-marketplace-demo)
 
 **Connect any AI agent to any framework — in under 5 minutes.**
 
@@ -98,7 +98,7 @@ agent.bind_tools([crewai_tool])
 ### 1. Install
 
 ```bash
-git clone https://github.com/trebortGolin/amorce.git
+git clone https://github.com/AmorceAATP/amorce.git
 cd amorce
 
 # Create virtual environment
@@ -727,7 +727,7 @@ python3 run_mcp_wrappers.py filesystem
 ### 📚 Documentation
 
 - **[Complete Guide](docs/MCP_WRAPPER.md)** - Architecture, deployment, examples
-- **[SDK Integration](https://github.com/trebortGolin/amorce_py_sdk#mcp-integration)** - Client usage
+- **[SDK Integration](https://github.com/AmorceAATP/amorce_py_sdk#mcp-integration)** - Client usage
 - **[Console Docs](https://amorce.io/docs/guides/mcp-integration)** - UI integration
 - **[Test Results](tests/TEST_RESULTS.md)** - Comprehensive test evidence
 
@@ -745,10 +745,10 @@ Comprehensively tested across 5 phases:
 
 ## 📚 Related Projects
 
-- [amorce_py_sdk](https://github.com/trebortGolin/amorce_py_sdk) - Python SDK
-- [amorce-js-sdk](https://github.com/trebortGolin/amorce-js-sdk) - JavaScript SDK
-- [amorce-trust-directory](https://github.com/trebortGolin/amorce-trust-directory) - Agent registry
-- [amorce-console](https://github.com/trebortGolin/amorce-console) - Management UI
+- [amorce_py_sdk](https://github.com/AmorceAATP/amorce_py_sdk) - Python SDK
+- [amorce-js-sdk](https://github.com/AmorceAATP/amorce-js-sdk) - JavaScript SDK
+- [amorce-trust-directory](https://github.com/AmorceAATP/amorce-trust-directory) - Agent registry
+- [amorce-console](https://github.com/AmorceAATP/amorce-console) - Management UI
 
 ---
 
