@@ -5,9 +5,11 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Live Demo](https://img.shields.io/badge/demo-marketplace-success.svg)](https://github.com/trebortGolin/agent-marketplace-demo)
 
-**The open-source runtime for secure AI agent-to-agent transactions.**
+**Connect any AI agent to any framework — in under 5 minutes.**
 
-Amorce is like Docker for AI agents: run it locally for development, or use Amorce Cloud for production hosting.
+LangChain, CrewAI, n8n, AutoGPT, ChatGPT, Claude, Gemini. One trust layer to connect them all.
+
+👉 **[Get started at amorce.io](https://amorce.io)**
 
 ---
 
@@ -21,11 +23,73 @@ Amorce is like Docker for AI agents: run it locally for development, or use Amor
 | **Claude** | `npx @amorce/mcp-server` | ✅ Ready |
 | **Gemini** | `amorce.io/.well-known/openapi.json` | ✅ Live |
 | **All LLMs** | `amorce.io/llms.txt` | ✅ Live |
+| **Google Cloud Agent Builder** | Agent Builder Catalog | 🔜 Future |
 
 **Try the API:**
 ```bash
 curl "https://amorce-trust-api-425870997313.us-central1.run.app/api/v1/ans/search?q=book+flight+to+Paris"
 ```
+
+---
+
+## 🔗 Cross-Framework Agent Communication (NEW)
+
+**Connect any AI agent framework to any other - without coupling your code.**
+
+```
+┌──────────┐         ┌─────────┐         ┌───────────┐
+│   n8n    │◄───────►│ Amorce  │◄───────►│ LangChain │
+│ Workflow │         │ Trust   │         │   Agent   │
+└──────────┘         │ Layer   │         └───────────┘
+                     │         │
+┌──────────┐         │         │         ┌───────────┐
+│ CrewAI   │◄───────►│         │◄───────►│  AutoGPT  │
+│  Crew    │         └─────────┘         │   Agent   │
+└──────────┘                             └───────────┘
+```
+
+| Integration | Package | Status |
+|-------------|---------|--------|
+| **LangChain** | `pip install langchain-amorce` | ✅ Ready |
+| **CrewAI** | `pip install crewai-amorce` | ✅ Ready |
+| **AutoGPT** | Plugin available | ✅ Ready |
+| **n8n** | `npm install n8n-nodes-amorce` | ✅ Ready |
+
+### Example: n8n calls CrewAI Agent
+
+```python
+# CrewAI agent receives signed request from n8n workflow
+{
+  "consumer_id": "n8n-workflow-agent",
+  "provider_id": "crewai-henri-seller",
+  "intent": "counter_offer",
+  "price": 500,
+  "signature": "MEQCIGeGkH..."  # EC P-256 signature
+}
+
+# Response: $550 counter-offer, cryptographically signed
+```
+
+### Example: LangChain discovers CrewAI crew
+
+```python
+from langchain_amorce import AmorceAgentTool
+
+# Discover any agent in the Amorce registry
+crewai_tool = AmorceAgentTool(agent_id="crewai-research-crew")
+
+# Use in LangChain - framework-agnostic!
+agent.bind_tools([crewai_tool])
+```
+
+**Why this matters:**
+- 🔒 **Trust without coupling** - Agents verify each other cryptographically
+- 🌐 **Discovery** - Find agents by capability, not hardcoded URLs
+- 🔄 **Any-to-any** - n8n ↔ LangChain ↔ CrewAI ↔ AutoGPT
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 - Python 3.11+
@@ -34,7 +98,6 @@ curl "https://amorce-trust-api-425870997313.us-central1.run.app/api/v1/ans/searc
 ### 1. Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/trebortGolin/amorce.git
 cd amorce
 
@@ -67,6 +130,18 @@ python orchestrator.py
 ```
 
 That's it! Your local Amorce runtime is ready.
+
+### 4. Register Your Agent (Recommended)
+
+To make your agent **discoverable by other frameworks** (LangChain, CrewAI, n8n, AutoGPT) and **major LLMs** (ChatGPT, Claude, Gemini), register it in the Amorce Trust Directory:
+
+1. **Validate** your agent at [amorce.io/validate](https://amorce.io/validate)
+2. **Register** at [amorce.io/register](https://amorce.io/register)
+
+Once registered, your agent will be:
+- 🔍 **Discoverable** via semantic search (ANS - Agent Naming Service)
+- ✅ **Verified** with a trust badge
+- 🤖 **Accessible** to LLMs via MCP integration
 
 ---
 
