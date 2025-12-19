@@ -401,7 +401,7 @@ curl -X POST http://localhost:8080/api/v1/approvals/apr_123/submit \
 ## Support
 
 - **Documentation**: https://amorce.io/docs
-- **GitHub**: https://github.com/trebortGolin/amorce
+- **GitHub**: https://github.com/AmorceAATP/amorce
 - **Community**: https://amorce.io/community
 
 ---

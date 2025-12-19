@@ -329,8 +329,8 @@ sequenceDiagram
 
 - [Ed25519 Specification](https://ed25519.cr.yp.to/)
 - [RFC 8785: Canonical JSON](https://www.rfc-editor.org/rfc/rfc8785)
-- [Amorce Python SDK](https://github.com/trebortGolin/amorce_py_sdk)
-- [Amorce JavaScript SDK](https://github.com/trebortGolin/amorce-js-sdk)
+- [Amorce Python SDK](https://github.com/AmorceAATP/amorce_py_sdk)
+- [Amorce JavaScript SDK](https://github.com/AmorceAATP/amorce-js-sdk)
 
 ---
 

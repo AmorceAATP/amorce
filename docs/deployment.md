@@ -18,7 +18,7 @@ This guide covers deploying Amorce in various environments.
 
 ```bash
 # Clone repository
-git clone https://github.com/trebortGolin/amorce.git
+git clone https://github.com/AmorceAATP/amorce.git
 cd amorce
 
 # Build Docker image
